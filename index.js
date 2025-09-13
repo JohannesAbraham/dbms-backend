@@ -1,9 +1,35 @@
 const express = require('express');
+const cors = require('cors');
 const app = express();
 const port = 3000;
 const pool = require('./db');
 
+app.use(cors({
+  origin: "http://localhost:5173", 
+  methods: ["GET", "POST", "PUT", "DELETE"],
+  credentials: true
+}));
+
 app.use(express.json());
+
+function buildUpdateQuery(table, idField, idValue, fields) {
+  const keys = Object.keys(fields);
+  const setClause = keys.map((key, i) => `${key} = $${i + 1}`).join(", ");
+  const values = Object.values(fields);
+  return {
+    text: `UPDATE ${table} SET ${setClause} WHERE ${idField} = $${keys.length + 1} RETURNING *`,
+    values: [...values, idValue],
+  };
+}
+
+app.get("/users", async (req, res) => {
+  try {
+    const result = await pool.query("SELECT * FROM users ORDER BY user_id ASC");
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).send(err.message);
+  }
+});
 
 // Add new user
 app.post('/users', async (req, res) => {
@@ -23,11 +49,8 @@ app.post('/users', async (req, res) => {
 // Update a user
 app.put('/users/:id', async (req, res) => {
   try {
-    const { username, role } = req.body;
-    const result = await pool.query(
-      'UPDATE users SET username=$1, role=$2 WHERE user_id=$3 RETURNING *',
-      [username, role, req.params.id]
-    );
+    const query = buildUpdateQuery("users", "user_id", req.params.id, req.body);
+    const result = await pool.query(query.text, query.values);
     res.json(result.rows[0]);
   } catch (err) {
     console.error(err.message);
@@ -43,6 +66,15 @@ app.delete('/users/:id', async (req, res) => {
   } catch (err) {
     console.error(err.message);
     res.status(500).send('Server Error');
+  }
+});
+
+app.get("/products", async (req, res) => {
+  try {
+    const result = await pool.query("SELECT * FROM products ORDER BY product_id ASC");
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).send(err.message);
   }
 });
 
@@ -64,13 +96,8 @@ app.post('/products', async (req, res) => {
 // Update product
 app.put('/products/:id', async (req, res) => {
   try {
-    const { product_name, category, unit, unit_price, reorder_level, status } = req.body;
-    const result = await pool.query(
-      `UPDATE products 
-       SET product_name=$1, category=$2, unit=$3, unit_price=$4, reorder_level=$5, status=$6 
-       WHERE product_id=$7 RETURNING *`,
-      [product_name, category, unit, unit_price, reorder_level, status, req.params.id]
-    );
+    const query = buildUpdateQuery("products", "product_id", req.params.id, req.body);
+    const result = await pool.query(query.text, query.values);
     res.json(result.rows[0]);
   } catch (err) {
     console.error(err.message);
@@ -86,6 +113,15 @@ app.delete('/products/:id', async (req, res) => {
   } catch (err) {
     console.error(err.message);
     res.status(500).send('Server Error');
+  }
+});
+
+app.get("/suppliers", async (req, res) => {
+  try {
+    const result = await pool.query("SELECT * FROM suppliers ORDER BY supplier_id ASC");
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).send(err.message);
   }
 });
 
@@ -107,11 +143,8 @@ app.post('/suppliers', async (req, res) => {
 // Update a supplier
 app.put('/suppliers/:id', async (req, res) => {
   try {
-    const { supplier_name, contact_info, address } = req.body;
-    const result = await pool.query(
-      'UPDATE suppliers SET supplier_name=$1, contact_info=$2, address=$3 WHERE supplier_id=$4 RETURNING *',
-      [supplier_name, contact_info, address, req.params.id]
-    );
+    const query = buildUpdateQuery("suppliers", "supplier_id", req.params.id, req.body);
+    const result = await pool.query(query.text, query.values);
     res.json(result.rows[0]);
   } catch (err) {
     console.error(err.message);
@@ -127,6 +160,15 @@ app.delete('/suppliers/:id', async (req, res) => {
   } catch (err) {
     console.error(err.message);
     res.status(500).send('Server Error');
+  }
+});
+
+app.get("/customers", async (req, res) => {
+  try {
+    const result = await pool.query("SELECT * FROM customers ORDER BY customer_id ASC");
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).send(err.message);
   }
 });
 
@@ -171,6 +213,36 @@ app.delete('/customers/:id', async (req, res) => {
   }
 });
 
+app.get('/transactions', async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT 
+         t.transaction_id,
+         t.product_id,
+         p.product_name,
+         t.transaction_type,
+         t.quantity,
+         t.transaction_date,
+         t.supplier_id,
+         s.supplier_name,
+         t.customer_id,
+         c.customer_name,
+         t.user_id,
+         u.username
+       FROM inventory_transactions t
+       LEFT JOIN products p ON t.product_id = p.product_id
+       LEFT JOIN suppliers s ON t.supplier_id = s.supplier_id
+       LEFT JOIN customers c ON t.customer_id = c.customer_id
+       LEFT JOIN users u ON t.user_id = u.user_id
+       ORDER BY t.transaction_date DESC`
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).send('Server Error');
+  }
+});
+
 // Add an inventory transaction
 app.post('/transactions', async (req, res) => {
   try {
@@ -191,13 +263,8 @@ app.post('/transactions', async (req, res) => {
 // Update an inventory transaction
 app.put('/transactions/:id', async (req, res) => {
   try {
-    const { transaction_type, quantity, supplier_id, customer_id, user_id } = req.body;
-    const result = await pool.query(
-      `UPDATE inventory_transactions 
-       SET transaction_type=$1, quantity=$2, supplier_id=$3, customer_id=$4, user_id=$5 
-       WHERE transaction_id=$6 RETURNING *`,
-      [transaction_type, quantity, supplier_id, customer_id, user_id, req.params.id]
-    );
+    const query = buildUpdateQuery("inventory_transactions", "transaction_id", req.params.id, req.body);
+    const result = await pool.query(query.text, query.values);
     res.json(result.rows[0]);
   } catch (err) {
     console.error(err.message);
