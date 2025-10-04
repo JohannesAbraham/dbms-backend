@@ -33,8 +33,81 @@ app.get("/users", async (req, res) => {
   }
 });
 
+app.post('/signup', async (req, res) => {
+  try {
+    const { username, password, role } = req.body;
+
+    const salt = await bcrypt.genSalt(10);
+    const password_hash = await bcrypt.hash(password, salt);
+
+    const result = await pool.query(
+      'INSERT INTO users (username, password_hash, role) VALUES ($1,$2,$3) RETURNING user_id, username, role',
+      [username, password_hash, role || 'staff']
+    );
+
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).send("Server Error");
+  }
+});
+
+router.post('/login', async (req, res) => {
+  try {
+    const { username, password } = req.body;
+
+    // find user
+    const result = await pool.query('SELECT * FROM users WHERE username=$1', [username]);
+    if (result.rows.length === 0) {
+      return res.status(400).json({ msg: "User not found" });
+    }
+
+    const user = result.rows[0];
+
+    // compare passwords
+    const isMatch = await bcrypt.compare(password, user.password_hash);
+    if (!isMatch) {
+      return res.status(400).json({ msg: "Invalid credentials" });
+    }
+
+    // create token
+    const token = jwt.sign(
+      { user_id: user.user_id, role: user.role },
+      JWT_SECRET,
+      { expiresIn: "1h" }
+    );
+
+    res.json({ token });
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).send("Server Error");
+  }
+});
+
+function authMiddleware(req, res, next) {
+  const token = req.header("Authorization")?.split(" ")[1];
+  if (!token) {
+    return res.status(401).json({ msg: "No token, authorization denied" });
+  }
+
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET);
+    req.user = decoded; // { user_id, role }
+    next();
+  } catch (err) {
+    res.status(401).json({ msg: "Token is not valid" });
+  }
+}
+
+function adminMiddleware(req, res, next) {
+  if (req.user.role !== "admin") {
+    return res.status(403).json({ msg: "Access denied: Admins only" });
+  }
+  next();
+}
+
 // Add new user
-app.post('/users', async (req, res) => {
+app.post('/users', authMiddleware, adminMiddleware, async (req, res) => {
   try {
     const { username, password} = req.body;
     const hashedPassword = await bcrypt.hash(password, 10);
@@ -49,8 +122,7 @@ app.post('/users', async (req, res) => {
   }
 });
 
-// Update user
-app.put('/users/:id', async (req, res) => {
+app.put('/users/:id', authMiddleware, adminMiddleware, async (req, res) => {
   try {
     const { username, password } = req.body;
     const { id } = req.params;
@@ -89,7 +161,7 @@ app.put('/users/:id', async (req, res) => {
 
 
 // Delete a user
-app.delete('/users/:id', async (req, res) => {
+app.delete('/users/:id', authMiddleware, adminMiddleware, async (req, res) => {
   try {
     await pool.query('DELETE FROM users WHERE user_id=$1', [req.params.id]);
     res.send('User deleted');
@@ -109,7 +181,7 @@ app.get("/products", async (req, res) => {
 });
 
 //Add a product
-app.post('/products', async (req, res) => {
+app.post('/products', authMiddleware, async (req, res) => {
   try {
     const { product_name, category, unit, unit_price, reorder_level, status } = req.body;
     const result = await pool.query(
@@ -124,7 +196,7 @@ app.post('/products', async (req, res) => {
 });
 
 // Update product
-app.put('/products/:id', async (req, res) => {
+app.put('/products/:id', authMiddleware, async (req, res) => {
   try {
     const query = buildUpdateQuery("products", "product_id", req.params.id, req.body);
     const result = await pool.query(query.text, query.values);
@@ -136,7 +208,7 @@ app.put('/products/:id', async (req, res) => {
 });
 
 // Delete product
-app.delete('/products/:id', async (req, res) => {
+app.delete('/products/:id', authMiddleware, async (req, res) => {
   try {
     await pool.query('DELETE FROM products WHERE product_id=$1', [req.params.id]);
     res.send('Product deleted');
@@ -156,7 +228,7 @@ app.get("/suppliers", async (req, res) => {
 });
 
 // Add a supplier
-app.post('/suppliers', async (req, res) => {
+app.post('/suppliers', authMiddleware, async (req, res) => {
   try {
     const { supplier_name, contact_info, address } = req.body;
     const result = await pool.query(
@@ -171,7 +243,7 @@ app.post('/suppliers', async (req, res) => {
 });
 
 // Update a supplier
-app.put('/suppliers/:id', async (req, res) => {
+app.put('/suppliers/:id', authMiddleware, async (req, res) => {
   try {
     const query = buildUpdateQuery("suppliers", "supplier_id", req.params.id, req.body);
     const result = await pool.query(query.text, query.values);
@@ -183,7 +255,7 @@ app.put('/suppliers/:id', async (req, res) => {
 });
 
 // Delete a supplier
-app.delete('/suppliers/:id', async (req, res) => {
+app.delete('/suppliers/:id', authMiddleware, async (req, res) => {
   try {
     await pool.query('DELETE FROM suppliers WHERE supplier_id=$1', [req.params.id]);
     res.send('Supplier deleted');
@@ -203,7 +275,7 @@ app.get("/customers", async (req, res) => {
 });
 
 // Add a customer
-app.post('/customers', async (req, res) => {
+app.post('/customers', authMiddleware, async (req, res) => {
   try {
     const { customer_name, contact_info } = req.body;
     const result = await pool.query(
@@ -218,7 +290,7 @@ app.post('/customers', async (req, res) => {
 });
 
 // Update a customer
-app.put('/customers/:id', async (req, res) => {
+app.put('/customers/:id', authMiddleware, async (req, res) => {
   try {
     const { customer_name, contact_info } = req.body;
     const result = await pool.query(
@@ -233,7 +305,7 @@ app.put('/customers/:id', async (req, res) => {
 });
 
 // Delete a customer
-app.delete('/customers/:id', async (req, res) => {
+app.delete('/customers/:id', authMiddleware, async (req, res) => {
   try {
     await pool.query('DELETE FROM customers WHERE customer_id=$1', [req.params.id]);
     res.send('Customer deleted');
@@ -274,7 +346,7 @@ app.get('/transactions', async (req, res) => {
 });
 
 // Add an inventory transaction
-app.post('/transactions', async (req, res) => {
+app.post('/transactions', authMiddleware, async (req, res) => {
   try {
     const { product_id, transaction_type, quantity, supplier_id, customer_id, user_id } = req.body;
     const result = await pool.query(
@@ -291,7 +363,7 @@ app.post('/transactions', async (req, res) => {
 });
 
 // Update an inventory transaction
-app.put('/transactions/:id', async (req, res) => {
+app.put('/transactions/:id', authMiddleware, async (req, res) => {
   try {
     const query = buildUpdateQuery("inventory_transactions", "transaction_id", req.params.id, req.body);
     const result = await pool.query(query.text, query.values);
@@ -303,7 +375,7 @@ app.put('/transactions/:id', async (req, res) => {
 });
 
 // Delete an inventory transaction
-app.delete('/transactions/:id', async (req, res) => {
+app.delete('/transactions/:id', authMiddleware, async (req, res) => {
   try {
     await pool.query('DELETE FROM inventory_transactions WHERE transaction_id=$1', [req.params.id]);
     res.send('Transaction deleted');
