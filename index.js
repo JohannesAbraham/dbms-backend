@@ -3,6 +3,9 @@ const cors = require('cors');
 const app = express();
 const port = 3000;
 const pool = require('./db');
+const bcrypt = require('bcrypt');
+const jwt = require('jsonwebtoken');
+const JWT_SECRET = "mysecretkey123";  
 
 app.use(cors({
   origin: "http://localhost:5173", 
@@ -50,7 +53,7 @@ app.post('/signup', async (req, res) => {
   }
 });
 
-router.post('/login', async (req, res) => {
+app.post('/signin', async (req, res) => {
   try {
     const { username, password } = req.body;
 
