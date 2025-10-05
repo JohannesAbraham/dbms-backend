@@ -1,5 +1,7 @@
 const express = require('express');
 const cors = require('cors');
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
 const app = express();
 const port = 3000;
 const pool = require('./db');
@@ -110,10 +112,11 @@ function adminMiddleware(req, res, next) {
 // Add new user
 app.post('/users', authMiddleware, adminMiddleware, async (req, res) => {
   try {
-    const { username, password_hash, role } = req.body;
+    const { username, password} = req.body;
+    const hashedPassword = await bcrypt.hash(password, 10);
     const result = await pool.query(
       'INSERT INTO users (username, password_hash, role) VALUES ($1, $2, $3) RETURNING *',
-      [username, password_hash, role || 'staff']
+      [username, hashedPassword,'staff']
     );
     res.json(result.rows[0]);
   } catch (err) {
@@ -122,17 +125,43 @@ app.post('/users', authMiddleware, adminMiddleware, async (req, res) => {
   }
 });
 
-// Update a user
 app.put('/users/:id', authMiddleware, adminMiddleware, async (req, res) => {
   try {
-    const query = buildUpdateQuery("users", "user_id", req.params.id, req.body);
-    const result = await pool.query(query.text, query.values);
+    const { username, password } = req.body;
+    const { id } = req.params;
+
+    // Fetch the existing user
+    const existingUser = await pool.query(
+      'SELECT * FROM users WHERE user_id = $1',
+      [id]
+    );
+
+    if (existingUser.rows.length === 0) {
+      return res.status(404).json({ msg: "User not found" });
+    }
+
+    // If password is provided, hash it, otherwise keep old one
+    let hashedPassword = existingUser.rows[0].password_hash;
+    if (password) {
+      hashedPassword = await bcrypt.hash(password, 10);
+    }
+
+    // Update username + password_hash
+    const result = await pool.query(
+      `UPDATE users
+       SET username = $1, password_hash = $2
+       WHERE user_id = $3
+       RETURNING *`,
+      [username || existingUser.rows[0].username, hashedPassword, id]
+    );
+
     res.json(result.rows[0]);
   } catch (err) {
     console.error(err.message);
     res.status(500).send('Server Error');
   }
 });
+
 
 // Delete a user
 app.delete('/users/:id', authMiddleware, adminMiddleware, async (req, res) => {
