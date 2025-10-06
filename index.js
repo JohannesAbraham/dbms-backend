@@ -1,13 +1,13 @@
 const express = require('express');
 const cors = require('cors');
-const bcrypt = require('bcryptjs');
+const bcrypt = require('bcrypt'); // use bcrypt (not both bcrypt & bcryptjs)
 const jwt = require('jsonwebtoken');
+const pool = require('./db');
+
 const app = express();
 const port = 3000;
-const pool = require('./db');
-const bcrypt = require('bcrypt');
-const jwt = require('jsonwebtoken');
-const JWT_SECRET = "mysecretkey123";  
+
+const JWT_SECRET = "mysecretkey123"; // define once
 
 app.use(cors({
   origin: "http://localhost:5173", 
@@ -16,6 +16,7 @@ app.use(cors({
 }));
 
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
 function buildUpdateQuery(table, idField, idValue, fields) {
   const keys = Object.keys(fields);
@@ -75,12 +76,16 @@ app.post('/signin', async (req, res) => {
 
     // create token
     const token = jwt.sign(
-      { user_id: user.user_id, role: user.role },
+      { 
+        user_id: user.user_id, 
+        role: user.role,
+        username: user.username
+      },
       JWT_SECRET,
       { expiresIn: "1h" }
     );
 
-    res.json({ token });
+    res.json({ token, role: user.role });
   } catch (err) {
     console.error(err.message);
     res.status(500).send("Server Error");
