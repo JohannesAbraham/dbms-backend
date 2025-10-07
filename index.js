@@ -353,18 +353,25 @@ app.get('/transactions', async (req, res) => {
   }
 });
 
-// Add an inventory transaction
+// Add an inventory transaction (Corrected)
 app.post('/transactions', authMiddleware, async (req, res) => {
   try {
-    const { product_id, transaction_type, quantity, supplier_id, customer_id, user_id } = req.body;
+    // 1. Get the user_id from the authenticated user's token (req.user)
+    const user_id = req.user.user_id;
+
+    // 2. Get the rest of the data from the form body
+    const { product_id, transaction_type, quantity, supplier_id, customer_id } = req.body;
+
     const result = await pool.query(
       `INSERT INTO inventory_transactions 
-       (product_id, transaction_type, quantity, supplier_id, customer_id, user_id) 
-       VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
+         (product_id, transaction_type, quantity, supplier_id, customer_id, user_id) 
+       VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+      // 3. Pass all variables to the query, including the trusted user_id from the token
       [product_id, transaction_type, quantity, supplier_id, customer_id, user_id]
     );
     res.json(result.rows[0]);
   } catch (err) {
+    // This will now log the detailed database error (e.g., foreign key violation)
     console.error(err.message);
     res.status(500).send('Server Error');
   }
